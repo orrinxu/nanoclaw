@@ -230,10 +230,8 @@ export class TelegramChannel implements Channel {
 
         await new Promise<void>((resolve, reject) => {
           const transport = fileUrl.startsWith('https') ? https : http;
-          transport.get(
-            fileUrl,
-            { family: 4 },
-            (res) => {
+          transport
+            .get(fileUrl, { family: 4 }, (res) => {
               const ws = fs.createWriteStream(destPath);
               res.pipe(ws);
               ws.on('finish', () => {
@@ -241,8 +239,8 @@ export class TelegramChannel implements Channel {
                 resolve();
               });
               ws.on('error', reject);
-            },
-          ).on('error', reject);
+            })
+            .on('error', reject);
         });
 
         logger.info(
@@ -262,7 +260,11 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:photo', async (ctx) => {
       const photos = ctx.message.photo;
       const largest = photos[photos.length - 1];
-      const saved = await downloadToWorkspace(ctx, largest.file_id, `photo_${Date.now()}.jpg`);
+      const saved = await downloadToWorkspace(
+        ctx,
+        largest.file_id,
+        `photo_${Date.now()}.jpg`,
+      );
       if (saved) {
         storeNonText(ctx, `[Photo saved to inbox/${saved}]`);
       } else {
@@ -271,7 +273,11 @@ export class TelegramChannel implements Channel {
     });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', async (ctx) => {
-      const saved = await downloadToWorkspace(ctx, ctx.message.voice.file_id, `voice_${Date.now()}.ogg`);
+      const saved = await downloadToWorkspace(
+        ctx,
+        ctx.message.voice.file_id,
+        `voice_${Date.now()}.ogg`,
+      );
       if (saved) {
         storeNonText(ctx, `[Voice message saved to inbox/${saved}]`);
       } else {
@@ -280,7 +286,11 @@ export class TelegramChannel implements Channel {
     });
     this.bot.on('message:audio', async (ctx) => {
       const name = ctx.message.audio?.file_name || `audio_${Date.now()}.mp3`;
-      const saved = await downloadToWorkspace(ctx, ctx.message.audio.file_id, name);
+      const saved = await downloadToWorkspace(
+        ctx,
+        ctx.message.audio.file_id,
+        name,
+      );
       if (saved) {
         storeNonText(ctx, `[Audio saved to inbox/${saved}]`);
       } else {
@@ -289,9 +299,16 @@ export class TelegramChannel implements Channel {
     });
     this.bot.on('message:document', async (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
-      const saved = await downloadToWorkspace(ctx, ctx.message.document.file_id, name);
+      const saved = await downloadToWorkspace(
+        ctx,
+        ctx.message.document.file_id,
+        name,
+      );
       if (saved) {
-        storeNonText(ctx, `[Document saved to inbox/${saved}] Read it with: cat /workspace/group/inbox/${saved}`);
+        storeNonText(
+          ctx,
+          `[Document saved to inbox/${saved}] Read it with: cat /workspace/group/inbox/${saved}`,
+        );
       } else {
         storeNonText(ctx, `[Document: ${name}]`);
       }

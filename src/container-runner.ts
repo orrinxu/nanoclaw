@@ -296,14 +296,25 @@ function buildContainerArgs(
 
   // Pass 1Password service account token for read-only vault access
   const opEnv = readEnvFile(['OP_SERVICE_ACCOUNT_TOKEN']);
-  const opToken = process.env.OP_SERVICE_ACCOUNT_TOKEN || opEnv.OP_SERVICE_ACCOUNT_TOKEN;
+  const opToken =
+    process.env.OP_SERVICE_ACCOUNT_TOKEN || opEnv.OP_SERVICE_ACCOUNT_TOKEN;
   if (opToken) {
     args.push('-e', `OP_SERVICE_ACCOUNT_TOKEN=${opToken}`);
   }
 
   // Pass Salesforce credentials for CRM access
-  const sfEnv = readEnvFile(['SALESFORCE_USERNAME', 'SALESFORCE_PASSWORD', 'SALESFORCE_TOKEN', 'SALESFORCE_INSTANCE_URL']);
-  for (const key of ['SALESFORCE_USERNAME', 'SALESFORCE_PASSWORD', 'SALESFORCE_TOKEN', 'SALESFORCE_INSTANCE_URL'] as const) {
+  const sfEnv = readEnvFile([
+    'SALESFORCE_USERNAME',
+    'SALESFORCE_PASSWORD',
+    'SALESFORCE_TOKEN',
+    'SALESFORCE_INSTANCE_URL',
+  ]);
+  for (const key of [
+    'SALESFORCE_USERNAME',
+    'SALESFORCE_PASSWORD',
+    'SALESFORCE_TOKEN',
+    'SALESFORCE_INSTANCE_URL',
+  ] as const) {
     const val = process.env[key] || sfEnv[key];
     if (val) {
       args.push('-e', `${key}=${val}`);

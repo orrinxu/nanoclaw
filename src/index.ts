@@ -434,7 +434,10 @@ async function startMessageLoop(): Promise<void> {
 
           if (queue.sendMessage(chatJid, formatted)) {
             // Claude is busy — try Qwen for simple messages instead of queuing
-            const ollamaResponse = await tryOllamaRoute(formatted, ASSISTANT_NAME);
+            const ollamaResponse = await tryOllamaRoute(
+              formatted,
+              ASSISTANT_NAME,
+            );
             if (ollamaResponse !== null) {
               logger.info(
                 { chatJid, count: messagesToSend.length },
@@ -457,7 +460,10 @@ async function startMessageLoop(): Promise<void> {
               channel
                 .setTyping?.(chatJid, true)
                 ?.catch((err) =>
-                  logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to set typing indicator',
+                  ),
                 );
             }
           } else {

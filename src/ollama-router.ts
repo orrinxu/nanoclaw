@@ -114,7 +114,11 @@ export async function queryOllama(
               reject(new Error(`Ollama returned no response`));
             }
           } catch {
-            reject(new Error(`Failed to parse Ollama response: ${data.slice(0, 200)}`));
+            reject(
+              new Error(
+                `Failed to parse Ollama response: ${data.slice(0, 200)}`,
+              ),
+            );
           }
         });
       },
@@ -140,10 +144,16 @@ export async function tryOllamaRoute(
 ): Promise<string | null> {
   // Check for system status keywords — run directly on host
   const lastMsg = extractLastMessage(prompt).toLowerCase();
-  if (/\b(system status|server status|cpu|gpu|temp|temperature|ram|memory usage|disk space|server health)\b/.test(lastMsg)) {
+  if (
+    /\b(system status|server status|cpu|gpu|temp|temperature|ram|memory usage|disk space|server health)\b/.test(
+      lastMsg,
+    )
+  ) {
     try {
       const scriptPath = `${process.cwd()}/scripts/system-status.sh`;
-      const output = execSync(`bash ${scriptPath}`, { timeout: 5000 }).toString().trim();
+      const output = execSync(`bash ${scriptPath}`, { timeout: 5000 })
+        .toString()
+        .trim();
       logger.info('System status query handled directly');
       return output;
     } catch (err) {
