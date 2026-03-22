@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -16,6 +17,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -175,6 +177,55 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Ori-Mnemos vault for persistent semantic memory
+  const oriVaultDir = path.join(DATA_DIR, 'ori-vault');
+  if (fs.existsSync(oriVaultDir)) {
+    mounts.push({
+      hostPath: oriVaultDir,
+      containerPath: '/workspace/ori-vault',
+      readonly: false,
+    });
+  }
+
+  // System status script (CPU, GPU, temps, memory)
+  const statusScript = path.join(process.cwd(), 'scripts', 'system-status.sh');
+  if (fs.existsSync(statusScript)) {
+    mounts.push({
+      hostPath: statusScript,
+      containerPath: '/usr/local/bin/system-status',
+      readonly: true,
+    });
+  }
+
+  // Plaud API skill (Python CLI for voice recordings/transcripts)
+  const plaudSkillDir = path.join(
+    process.env.HOME || os.homedir(),
+    '.claude',
+    'skills',
+    'plaud-api',
+  );
+  if (fs.existsSync(plaudSkillDir)) {
+    mounts.push({
+      hostPath: plaudSkillDir,
+      containerPath: '/workspace/plaud-api',
+      readonly: true,
+    });
+  }
+
+  // Google Drive MCP credentials (read-only — tokens refreshed by MCP server)
+  const gdriveConfigDir = path.join(
+    process.env.HOME || os.homedir(),
+    '.config',
+    'google-drive-mcp',
+  );
+  if (fs.existsSync(gdriveConfigDir)) {
+    mounts.push({
+      hostPath: gdriveConfigDir,
+      containerPath: '/workspace/gdrive-config',
+      readonly: false,
+    });
+  }
+
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
@@ -218,13 +269,18 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // On Linux, use host networking so containers can reach the credential proxy
+  // and Ollama on localhost without Docker bridge networking issues.
+  args.push('--network=host');
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Route API traffic through the credential proxy (containers never see real secrets)
+  // With host networking, localhost works directly
   args.push(
     '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    `ANTHROPIC_BASE_URL=http://127.0.0.1:${CREDENTIAL_PROXY_PORT}`,
   );
 
   // Mirror the host's auth method with a placeholder value.
@@ -236,6 +292,33 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass 1Password service account token for read-only vault access
+  const opEnv = readEnvFile(['OP_SERVICE_ACCOUNT_TOKEN']);
+  const opToken = process.env.OP_SERVICE_ACCOUNT_TOKEN || opEnv.OP_SERVICE_ACCOUNT_TOKEN;
+  if (opToken) {
+    args.push('-e', `OP_SERVICE_ACCOUNT_TOKEN=${opToken}`);
+  }
+
+  // Pass Salesforce credentials for CRM access
+  const sfEnv = readEnvFile(['SALESFORCE_USERNAME', 'SALESFORCE_PASSWORD', 'SALESFORCE_TOKEN', 'SALESFORCE_INSTANCE_URL']);
+  for (const key of ['SALESFORCE_USERNAME', 'SALESFORCE_PASSWORD', 'SALESFORCE_TOKEN', 'SALESFORCE_INSTANCE_URL'] as const) {
+    const val = process.env[key] || sfEnv[key];
+    if (val) {
+      args.push('-e', `${key}=${val}`);
+    }
+  }
+
+  // Pass Plaud API credentials for voice recording access
+  const plaudEnv = readEnvFile(['PLAUD_TOKEN', 'PLAUD_API_DOMAIN']);
+  const plaudToken = process.env.PLAUD_TOKEN || plaudEnv.PLAUD_TOKEN;
+  const plaudDomain = process.env.PLAUD_API_DOMAIN || plaudEnv.PLAUD_API_DOMAIN;
+  if (plaudToken) {
+    args.push('-e', `PLAUD_TOKEN=${plaudToken}`);
+  }
+  if (plaudDomain) {
+    args.push('-e', `PLAUD_API_DOMAIN=${plaudDomain}`);
   }
 
   // Runtime-specific args for host gateway resolution

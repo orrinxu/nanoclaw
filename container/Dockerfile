@@ -24,14 +24,18 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
+    python3-requests \
+    && pip3 install --break-system-packages python-dotenv \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser, claude-code, ori-memory, google-drive-mcp, and 1password-mcp globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code ori-memory @piotr-agier/google-drive-mcp @takescake/1password-mcp @tsmztech/mcp-server-salesforce
 
 # Create app directory
 WORKDIR /app

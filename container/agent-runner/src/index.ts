@@ -408,7 +408,11 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__ollama__*'
+        'mcp__ollama__*',
+        'mcp__ori__*',
+        'mcp__gdrive__*',
+        'mcp__onepassword__*',
+        'mcp__salesforce__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -427,6 +431,34 @@ async function runQuery(
         ollama: {
           command: 'node',
           args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
+        },
+        ori: {
+          command: 'ori',
+          args: ['serve', '--mcp', '--vault', '/workspace/ori-vault'],
+        },
+        gdrive: {
+          command: 'google-drive-mcp',
+          args: [],
+          env: {
+            GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/workspace/gdrive-config',
+          },
+        },
+        onepassword: {
+          command: 'npx',
+          args: ['-y', '@takescake/1password-mcp'],
+          env: {
+            OP_SERVICE_ACCOUNT_TOKEN: process.env.OP_SERVICE_ACCOUNT_TOKEN || '',
+          },
+        },
+        salesforce: {
+          command: 'npx',
+          args: ['-y', '@tsmztech/mcp-server-salesforce'],
+          env: {
+            SALESFORCE_USERNAME: process.env.SALESFORCE_USERNAME || '',
+            SALESFORCE_PASSWORD: process.env.SALESFORCE_PASSWORD || '',
+            SALESFORCE_TOKEN: process.env.SALESFORCE_TOKEN || '',
+            SALESFORCE_INSTANCE_URL: process.env.SALESFORCE_INSTANCE_URL || '',
+          },
         },
       },
       hooks: {

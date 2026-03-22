@@ -1,3 +1,7 @@
+// Force IPv4 for all fetch/undici requests — avoids IPv6 timeouts on Tailscale networks
+import { setGlobalDispatcher, Agent as UndiciAgent } from 'undici';
+setGlobalDispatcher(new UndiciAgent({ connect: { family: 4 } }));
+
 import fs from 'fs';
 import path from 'path';
 
@@ -26,6 +30,7 @@ import {
   ensureContainerRuntimeRunning,
   PROXY_BIND_HOST,
 } from './container-runtime.js';
+import { tryOllamaRoute } from './ollama-router.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -192,6 +197,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     { group: group.name, messageCount: missedMessages.length },
     'Processing messages',
   );
+
+  // Try Ollama for simple queries — skip container entirely if handled
+  const ollamaResponse = await tryOllamaRoute(prompt, ASSISTANT_NAME);
+  if (ollamaResponse !== null) {
+    logger.info({ group: group.name }, 'Ollama handled message directly');
+    await channel.sendMessage(chatJid, ollamaResponse);
+    return true;
+  }
 
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -420,19 +433,33 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
-            channel
-              .setTyping?.(chatJid, true)
-              ?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+            // Claude is busy — try Qwen for simple messages instead of queuing
+            const ollamaResponse = await tryOllamaRoute(formatted, ASSISTANT_NAME);
+            if (ollamaResponse !== null) {
+              logger.info(
+                { chatJid, count: messagesToSend.length },
+                'Claude busy, Ollama handled message directly',
               );
+              lastAgentTimestamp[chatJid] =
+                messagesToSend[messagesToSend.length - 1].timestamp;
+              saveState();
+              await channel.sendMessage(chatJid, ollamaResponse);
+            } else {
+              // Complex message — pipe to active container
+              logger.debug(
+                { chatJid, count: messagesToSend.length },
+                'Piped messages to active container',
+              );
+              lastAgentTimestamp[chatJid] =
+                messagesToSend[messagesToSend.length - 1].timestamp;
+              saveState();
+              // Show typing indicator while the container processes the piped message
+              channel
+                .setTyping?.(chatJid, true)
+                ?.catch((err) =>
+                  logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                );
+            }
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);

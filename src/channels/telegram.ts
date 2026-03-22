@@ -1,8 +1,12 @@
+import fs from 'fs';
 import https from 'https';
+import http from 'http';
+import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -56,7 +60,10 @@ export class TelegramChannel implements Channel {
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken, {
       client: {
-        baseFetchConfig: { agent: https.globalAgent, compress: true },
+        baseFetchConfig: {
+          agent: new https.Agent({ family: 4 }),
+          compress: true,
+        },
       },
     });
 
@@ -199,13 +206,95 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    // Download a Telegram file to the group's inbox directory
+    const downloadToWorkspace = async (
+      ctx: any,
+      fileId: string,
+      filename: string,
+    ): Promise<string | null> => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return null;
+
+      try {
+        const groupDir = resolveGroupFolderPath(group.folder);
+        const inboxDir = path.join(groupDir, 'inbox');
+        fs.mkdirSync(inboxDir, { recursive: true });
+
+        // Sanitize filename
+        const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const destPath = path.join(inboxDir, safeName);
+
+        const file = await this.bot!.api.getFile(fileId);
+        const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+
+        await new Promise<void>((resolve, reject) => {
+          const transport = fileUrl.startsWith('https') ? https : http;
+          transport.get(
+            fileUrl,
+            { family: 4 },
+            (res) => {
+              const ws = fs.createWriteStream(destPath);
+              res.pipe(ws);
+              ws.on('finish', () => {
+                ws.close();
+                resolve();
+              });
+              ws.on('error', reject);
+            },
+          ).on('error', reject);
+        });
+
+        logger.info(
+          { chatJid, filename: safeName },
+          'Telegram file downloaded to inbox',
+        );
+        return safeName;
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Failed to download Telegram file',
+        );
+        return null;
+      }
+    };
+
+    this.bot.on('message:photo', async (ctx) => {
+      const photos = ctx.message.photo;
+      const largest = photos[photos.length - 1];
+      const saved = await downloadToWorkspace(ctx, largest.file_id, `photo_${Date.now()}.jpg`);
+      if (saved) {
+        storeNonText(ctx, `[Photo saved to inbox/${saved}]`);
+      } else {
+        storeNonText(ctx, '[Photo]');
+      }
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
+    this.bot.on('message:voice', async (ctx) => {
+      const saved = await downloadToWorkspace(ctx, ctx.message.voice.file_id, `voice_${Date.now()}.ogg`);
+      if (saved) {
+        storeNonText(ctx, `[Voice message saved to inbox/${saved}]`);
+      } else {
+        storeNonText(ctx, '[Voice message]');
+      }
+    });
+    this.bot.on('message:audio', async (ctx) => {
+      const name = ctx.message.audio?.file_name || `audio_${Date.now()}.mp3`;
+      const saved = await downloadToWorkspace(ctx, ctx.message.audio.file_id, name);
+      if (saved) {
+        storeNonText(ctx, `[Audio saved to inbox/${saved}]`);
+      } else {
+        storeNonText(ctx, '[Audio]');
+      }
+    });
+    this.bot.on('message:document', async (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+      const saved = await downloadToWorkspace(ctx, ctx.message.document.file_id, name);
+      if (saved) {
+        storeNonText(ctx, `[Document saved to inbox/${saved}] Read it with: cat /workspace/group/inbox/${saved}`);
+      } else {
+        storeNonText(ctx, `[Document: ${name}]`);
+      }
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
