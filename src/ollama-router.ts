@@ -1,4 +1,6 @@
 import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import https from 'https';
 import http from 'http';
 import { logger } from './logger.js';
@@ -33,36 +35,62 @@ function extractLastMessage(prompt: string): string {
 export function isSimpleQuery(prompt: string): boolean {
   const text = extractLastMessage(prompt).toLowerCase();
 
-  // Only delegate to Claude when the message clearly needs tools or code
-  const complexPatterns = [
-    // Explicit tool/service requests
-    /\b(salesforce|google drive|1password|plaud|ori mnemos)\b/i,
-    /\b(use claude|ask claude)\b/,
-    // Code/file operations (must mention specific files or code concepts)
-    /\b(read|write|edit|create|delete)\b.*\b(file|code|script)\b/,
-    /\b(commit|push|pull|merge|deploy|build|refactor|debug)\b/,
-    // File paths
-    /\b(\.ts|\.js|\.py|\.json|\.md|\.yaml|\.env|\.sh)\b/,
-    /\b(src\/|container\/|groups\/|data\/|\/workspace)\b/,
-    // Scheduling
-    /\b(schedule|remind me|set a reminder|cron)\b/,
-    // Explicit multi-step
-    /\b(step by step|implement|configure|install|set up)\b/,
-    // File attachments that need processing
-    /\[Document saved|\.pdf|\.docx|\.xlsx/,
-    // Database/API work
-    /\b(soql|query|sql|apex)\b/i,
+  // Qwen ONLY handles these — everything else goes to Claude
+  const simplePatterns = [
+    // Greetings
+    /^(hi|hello|hey|good morning|good afternoon|good evening|good night|thanks|thank you|ok|okay|bye|gn|gm)\b/i,
+    // Quick factual questions (what is, who is, define, meaning of)
+    /^(what is|what are|who is|who are|define|meaning of|how do you say|translate|convert)\b/i,
+    // Simple math or conversions
+    /^\d+\s*[\+\-\*\/\%]\s*\d+/,
+    /\b(celsius|fahrenheit|km|miles|kg|pounds|convert)\b/i,
+    // General knowledge that doesn't need memory or tools
+    /^(what time|what date|what day)\b/i,
+    // Chinese language, China-related queries — Qwen's strength
+    /[\u4e00-\u9fff]/,  // Contains Chinese characters
+    /\b(chinese|mandarin|cantonese|pinyin|china|beijing|shanghai|shenzhen|guangzhou|chengdu|wuhan|hangzhou|nanjing|taiwan|hong kong|macau)\b/i,
+    /\b(translate.*chinese|chinese.*translate|in chinese|in mandarin)\b/i,
+    /\b(baidu|weibo|wechat|xiaohongshu|douyin|bilibili|tencent|alibaba|bytedance|huawei|xiaomi|oppo|vivo|jd\.com|taobao|tmall|pinduoduo)\b/i,
   ];
 
-  for (const pattern of complexPatterns) {
-    if (pattern.test(text)) return false;
+  for (const pattern of simplePatterns) {
+    if (pattern.test(text)) return true;
   }
 
-  // Very long messages are likely complex
-  if (text.length > 1000) return false;
+  // Default: Claude handles it (has memory, tools, conversation history)
+  return false;
+}
 
-  // Default: Ollama handles it
-  return true;
+/**
+ * Load key Ori-Mnemos notes for context.
+ * Reads note files directly — fast, no MCP overhead.
+ */
+function loadOriContext(): string {
+  const vaultNotes = path.join(process.cwd(), 'data', 'ori-vault', 'notes');
+  try {
+    if (!fs.existsSync(vaultNotes)) return '';
+    const files = fs.readdirSync(vaultNotes).filter((f) => f.endsWith('.md') && f !== 'index.md');
+    if (files.length === 0) return '';
+
+    const notes: string[] = [];
+    let totalLen = 0;
+    const MAX_CONTEXT = 2000; // Keep it short for fast inference
+
+    for (const file of files.slice(0, 10)) {
+      const content = fs.readFileSync(path.join(vaultNotes, file), 'utf-8');
+      // Strip YAML frontmatter
+      const body = content.replace(/^---[\s\S]*?---\n?/, '').trim();
+      if (body && totalLen + body.length < MAX_CONTEXT) {
+        notes.push(body);
+        totalLen += body.length;
+      }
+    }
+
+    if (notes.length === 0) return '';
+    return `\n\nRelevant memory notes:\n${notes.join('\n---\n')}`;
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -76,10 +104,20 @@ export async function queryOllama(
   const isHttps = url.protocol === 'https:';
   const transport = isHttps ? https : http;
 
+  const oriContext = loadOriContext();
+
   const body = JSON.stringify({
     model: OLLAMA_MODEL,
     prompt: userMessage,
-    system: `/no_think You are ${assistantName}, a helpful personal assistant. Be concise and direct. Do not use markdown formatting unless asked.`,
+    system: `/no_think You are ${assistantName}, a helpful personal assistant running on a home server via NanoClaw. Be concise and direct. Do not use markdown formatting unless asked.
+
+You handle simple questions directly. For complex tasks, the user's message is automatically routed to a more capable agent (Claude) that has access to:
+- File system (inbox, ingest folder, documents)
+- Ori-Mnemos persistent memory
+- Google Drive, Salesforce, 1Password, Plaud recordings
+- Web browser, code execution, system monitoring
+
+If someone asks about files, memory, ingest, or any tool you dont have, tell them their request is being forwarded to the full agent, or suggest they rephrase to trigger the advanced agent. Never say you cannot access files or memory — the system can, just not through you directly.${oriContext}`,
     stream: false,
     keep_alive: '24h',
     options: {

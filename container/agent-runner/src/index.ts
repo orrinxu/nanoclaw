@@ -435,6 +435,11 @@ async function runQuery(
         ori: {
           command: 'ori',
           args: ['serve', '--mcp', '--vault', '/workspace/ori-vault'],
+          env: {
+            HF_HOME: '/home/node/.cache/huggingface',
+            TRANSFORMERS_CACHE: '/home/node/.cache/huggingface',
+            XDG_CACHE_HOME: '/home/node/.cache',
+          },
         },
         gdrive: {
           command: 'google-drive-mcp',

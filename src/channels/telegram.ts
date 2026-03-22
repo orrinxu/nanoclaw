@@ -387,14 +387,35 @@ export class TelegramChannel implements Channel {
     }
   }
 
+  private typingIntervals: Map<string, ReturnType<typeof setInterval>> = new Map();
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    if (!this.bot || !isTyping) return;
-    try {
-      const numericId = jid.replace(/^tg:/, '');
-      await this.bot.api.sendChatAction(numericId, 'typing');
-    } catch (err) {
-      logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
+    if (!this.bot) return;
+
+    const existing = this.typingIntervals.get(jid);
+
+    if (!isTyping) {
+      // Stop the repeating typing indicator
+      if (existing) {
+        clearInterval(existing);
+        this.typingIntervals.delete(jid);
+      }
+      return;
     }
+
+    // Already typing for this chat
+    if (existing) return;
+
+    const numericId = jid.replace(/^tg:/, '');
+    const sendTyping = () => {
+      this.bot!.api.sendChatAction(numericId, 'typing').catch((err) => {
+        logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
+      });
+    };
+
+    // Send immediately, then repeat every 4 seconds (Telegram expires at 5s)
+    sendTyping();
+    this.typingIntervals.set(jid, setInterval(sendTyping, 4000));
   }
 }
 
